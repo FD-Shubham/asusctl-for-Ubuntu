@@ -95,7 +95,7 @@ D-Bus Policy Error: If the service fails to start, Ubuntu may need a symlink for
 
 Brightness Keys: If your screen brightness keys stop working, add acpi_backlight=vendor to your Grub config:
 
-        sudo nano /etc/default/grub
+    sudo nano /etc/default/grub
 
 Add the parameter to GRUB_CMDLINE_LINUX_DEFAULT.
 Run
