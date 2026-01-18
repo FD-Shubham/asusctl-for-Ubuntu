@@ -59,6 +59,7 @@ sudo make install
 5. Critical Post-Install Steps
 
 These steps are mandatory for the software to actually control your hardware.
+
 A. Resolve Service Conflicts
 
 Ubuntu's default power-profiles-daemon will conflict with asusd. You must disable it:
