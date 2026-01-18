@@ -7,12 +7,11 @@ asusctl is a fantastic utility for ASUS ROG/TUF laptops, but it is primarily pac
 1. Install System Dependencies
 
 Ubuntu uses different package names than the Fedora defaults. Run this to prepare your environment:
-Bash
 
-sudo apt update
-sudo apt install -y libclang-dev libudev-dev libseccomp-dev \
-libseat-dev libsensors4-dev libpulse-dev \
-build-essential git cmake
+    sudo apt update
+    sudo apt install -y libclang-dev libudev-dev libseccomp-dev \
+    libseat-dev libsensors4-dev libpulse-dev \
+    build-essential git cmake
 
 2. Install Rust Toolchain
 
