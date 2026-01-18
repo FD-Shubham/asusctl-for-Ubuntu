@@ -17,18 +17,15 @@ Ubuntu uses different package names than the Fedora defaults. Run this to prepar
 
 The version of Rust in the Ubuntu repositories is often too old. Use rustup to get the latest stable version:
 
-    Install Rust:
-    Bash
+Install Rust:
 
     curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 
-    Refresh your shell:
-    Bash
+Refresh your shell:
 
     source $HOME/.cargo/env
 
-    Set the Clang Path: Rust needs to know where libclang is. Note that the version number (e.g., 14) may vary depending on your Ubuntu version. Check /usr/lib/llvm-*/lib to verify.
-    Bash
+Set the Clang Path: Rust needs to know where libclang is. Note that the version number (e.g., 14) may vary depending on your Ubuntu version. Check /usr/lib/llvm-*/lib to verify.
 
     export LIBCLANG_PATH=/usr/lib/llvm-14/lib
 
@@ -36,24 +33,21 @@ The version of Rust in the Ubuntu repositories is often too old. Use rustup to g
 
 Since asusctl expects Fedora's group permissions, we need to patch the source before building.
 
-    Clone the repo:
-    Bash
+Clone the repo:
 
     git clone https://gitlab.com/asus-linux/asusctl.git
     cd asusctl
 
-    Fix Group Permissions (udev): Ubuntu uses the sudo group for administrative privileges, while Fedora uses wheel. Run this command to swap them in the configuration:
-    Bash
+Fix Group Permissions (udev): Ubuntu uses the sudo group for administrative privileges, while Fedora uses wheel. Run this command to swap them in the configuration:
 
     sed -i 's/GROUP="wheel"/GROUP="sudo"/g' data/99-asusd.rules
 
 4. Build and Install
 
 Now, compile the project and install it to your system.
-Bash
 
-make
-sudo make install
+    make
+    sudo make install
 
 5. Critical Post-Install Steps
 
@@ -62,10 +56,9 @@ These steps are mandatory for the software to actually control your hardware.
 A. Resolve Service Conflicts
 
 Ubuntu's default power-profiles-daemon will conflict with asusd. You must disable it:
-Bash
 
-sudo systemctl stop power-profiles-daemon
-sudo systemctl mask power-profiles-daemon
+    sudo systemctl stop power-profiles-daemon
+    sudo systemctl mask power-profiles-daemon
 
 B. Enable Kernel Modules (RGB/Matrix Support)
 
@@ -73,40 +66,38 @@ If your laptop has RGB lighting or an AniMe Matrix display, you must load the i2
 Bash
 
 # Load for the current session
-sudo modprobe i2c-dev
+    sudo modprobe i2c-dev
 
 # Ensure it loads on every boot
-echo "i2c-dev" | sudo tee /etc/modules-load.d/i2c-dev.conf
+    echo "i2c-dev" | sudo tee /etc/modules-load.d/i2c-dev.conf
 
 C. Update User Groups
 
 Add your user to the necessary groups to allow communication with the hardware without constant sudo prompts:
-Bash
 
-sudo usermod -aG video,input,i2c $USER
+    sudo usermod -aG video,input,i2c $USER
 
 Note: You must log out and log back in for these group changes to take effect.
 6. Activation
 
 Reload the systemd manager and start the daemon:
-Bash
 
-sudo systemctl daemon-reload
-sudo systemctl enable --now asusd
+    sudo systemctl daemon-reload
+    sudo systemctl enable --now asusd
 
 If you installed the graphical interface (rog-control-center), update the desktop database so it appears in your app drawer:
-Bash
 
-sudo update-desktop-database
+    sudo update-desktop-database
 
 Troubleshooting FAQ
 
-    D-Bus Policy Error: If the service fails to start, Ubuntu may need a symlink for the D-Bus configuration: sudo ln -s /usr/share/dbus-1/system.d/asusd.conf /etc/dbus-1/system.d/asusd.conf
+D-Bus Policy Error: If the service fails to start, Ubuntu may need a symlink for the D-Bus configuration: sudo ln -s /usr/share/dbus-1/system.d/asusd.conf /etc/dbus-1/system.d/asusd.conf
 
-    Brightness Keys: If your screen brightness keys stop working, add acpi_backlight=vendor to your Grub config:
+Brightness Keys: If your screen brightness keys stop working, add acpi_backlight=vendor to your Grub config:
 
         sudo nano /etc/default/grub
 
-        Add the parameter to GRUB_CMDLINE_LINUX_DEFAULT.
+Add the parameter to GRUB_CMDLINE_LINUX_DEFAULT.
+Run
 
-        Run sudo update-grub and reboot.
+    sudo update-grub and reboot.
