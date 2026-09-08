@@ -2,7 +2,7 @@
 Porting asusctl (made for Fedora) for Ubuntu
 
 > **Have an ASUS ROG Zephyrus G14 2024 (GA403UI) or similar Ryzen + NVIDIA MUX laptop with an OLED panel?**
-> See [`TESTED-CONFIG-GA403UI.md`](TESTED-CONFIG-GA403UI.md) for the specific tested kernel/driver combo and fixes for intermittent brightness keys, MUX/GPU mode switching, and suspend not staying asleep.
+> See [`TESTED-CONFIG-GA403UI.md`](TESTED-CONFIG-GA403UI.md) for a full start-to-finish setup/fix reference: boot splash, the tested kernel/NVIDIA-driver combo (with migration steps off a frozen manual install), `asusd-user` and `rog-control-center` crash workarounds, intermittent brightness keys, MUX/GPU mode switching + fan curves, suspend not staying asleep, and general update hygiene.
 
 Installing asusctl on Ubuntu
 

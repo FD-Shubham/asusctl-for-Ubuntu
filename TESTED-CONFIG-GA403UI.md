@@ -1,6 +1,6 @@
 # Tested Configuration: ASUS ROG Zephyrus G14 2024 (GA403UI)
 
-Real-world fixes confirmed working on this specific machine, beyond the general install steps in the main [README](README.md). If you have this exact model (or a similar Ryzen + NVIDIA Optimus/MUX ROG laptop with an OLED panel), start here.
+A start-to-finish set of real-world fixes confirmed working on this specific machine, beyond the general `asusctl` build/install steps in the main [README](README.md). If you have this exact model (or a similar Ryzen + NVIDIA Optimus/MUX ROG laptop with an OLED panel), this is the order to work through things in.
 
 ## Hardware / software this was validated on
 
@@ -18,9 +18,118 @@ Real-world fixes confirmed working on this specific machine, beyond the general 
 
 **Why this driver/kernel combo specifically:** NVIDIA driver branches before 580.x use the legacy `EXTRA_CFLAGS` Kbuild variable for their include path. Linux 6.15+ dropped compatibility shimming for `EXTRA_CFLAGS`, so on HWE kernels built past that cutoff the driver's dkms build silently drops its include path and fails with `fatal error: os-interface.h: No such file or directory` — a missing `-I` flag, not a missing file. `580.173.02`'s Kbuild uses `ccflags-y` instead, which still works. Confirmed by reading the actual Kbuild source, not inferred from the version number alone — some early 580.x point releases have been reported to still fail against newer HWE kernels, so this exact build is what's known-good here.
 
+**Before you start — GPU/Optimus base setup:** the NVIDIA Optimus/hybrid-graphics setup on this machine (kernel boot params like `nvidia_drm.modeset=1`, `nvidia.NVreg_DynamicPowerManagement=0x02`) was originally done by following a third-party GPU setup guide, not reproduced here — this doc picks up from there. If you're setting up from a bare Ubuntu install, get NVIDIA Optimus working first (`nvidia-smi` shows the dGPU, `nvidia-drm.modeset=1` in `/proc/cmdline`) before working through the items below.
+
 ---
 
-## 1. Brightness keys stop working intermittently
+## 1. Boot screen shows raw error text instead of a splash
+
+**Symptom:** boot "stops" and shows plain error text instead of a clean splash screen.
+
+**Root cause:** `/etc/default/grub` had `GRUB_CMDLINE_LINUX_DEFAULT="quiet ..."` with no `splash`. Without `splash`, Plymouth never takes over the console, so real (but harmless) kernel boot messages print as plain text — mostly firmware/DSDT bugs common across ASUS ROG boards (references to a WWAN slot / network chip this SKU doesn't physically have, a duplicate WLAN power-state declaration, a missing thermal method) and a known USB-C UCSI controller init-timeout warning that hits many 2023-2025 laptops. All cosmetic — not fixable from the OS side.
+
+**Fix:**
+```bash
+sudo nano /etc/default/grub
+```
+Add `splash` back to `GRUB_CMDLINE_LINUX_DEFAULT`. Also worth setting `GRUB_TIMEOUT_STYLE=menu` / `GRUB_TIMEOUT=3` instead of `hidden`/`0`, so the GRUB menu (and fallback kernels) stays reachable if a future boot ever goes wrong.
+```bash
+sudo update-grub
+```
+
+**Verify:** `cat /proc/cmdline` shows `splash`.
+
+---
+
+## 2. Kernel & NVIDIA driver: moving off a frozen manual install
+
+**Starting point this was recovering from:** a manually installed, unofficial mainline kernel build (installed because this 2024 hardware was too new for Ubuntu 24.04's launch kernel at the time) paired with a `.run`-installed NVIDIA driver — neither apt-managed, `canonical-livepatch` reporting the kernel `unsupported`. If your setup already uses the standard HWE kernel and an apt-installed `nvidia-driver-5xx`, skip to section 3.
+
+**Target:** `linux-generic-hwe-24.04` (current, security-patched, livepatch-eligible) + `nvidia-driver-580` (apt-managed, has the Kbuild fix described above).
+
+**The blocker:** simply installing the new kernel packages alongside the old one is safe (nothing is removed), but the post-install dkms hook will try to rebuild the *old* NVIDIA driver against the *new* kernel's headers — and if that old driver predates the `ccflags-y` migration, the build fails, leaving some kernel packages stuck "unconfigured" in dpkg (not corrupted, just mid-postinst). This is harmless as long as you haven't rebooted into the new kernel yet.
+
+**Fix, in order:**
+1. Install the new kernel packages: `sudo apt install linux-generic-hwe-24.04` (do **not** reboot yet).
+2. Cleanly remove the old manually-installed NVIDIA driver with its own uninstaller (tracks exactly what the `.run` installer placed) — keep the original `.run` file around as a rollback path in case anything goes wrong:
+   ```bash
+   sudo /usr/bin/nvidia-uninstall -s
+   sudo dkms remove nvidia/<old-version> --all   # safety net for any lingering registration
+   ```
+3. Install the apt-packaged driver:
+   ```bash
+   sudo apt install -y nvidia-driver-580
+   ```
+4. Resolve the packages left "unconfigured" from step 1 — this re-triggers the dkms autoinstall hook, which should now succeed against both kernels since the new driver's Kbuild is fixed:
+   ```bash
+   sudo dpkg --configure -a
+   ```
+5. Before rebooting, confirm the new driver built against **both** kernels:
+   ```bash
+   dkms status   # should show nvidia/580.173.02 installed for both the old and new kernel
+   ```
+6. Reboot, then verify:
+   ```bash
+   uname -r        # new HWE kernel
+   nvidia-smi       # driver 580.173.02, dGPU detected
+   dkms status      # installed for the running kernel
+   ```
+
+**Rollback path if anything goes wrong before rebooting:** the current (old) kernel stays installed and selectable from the GRUB menu regardless of driver outcome, and re-running the original `.run` installer with `sudo bash` restores the exact previous manual-install state.
+
+**A new issue this can introduce:** `nvidia-driver-580` enables `nvidia-persistenced.service`, which a `.run`-based install typically never sets up. It can get tangled in a systemd ordering cycle with the save/restore unit for the phantom `nvidia_0` backlight device (see Brightness, below) via `basic.target`/`sockets.target`. Non-fatal — boot completes fine — but logs a cycle warning every boot. Since `nvidia_0` is already a known-dead backlight device on this hardware, just stop systemd from tracking it:
+```bash
+sudo systemctl mask 'systemd-backlight@backlight:nvidia_0.service'
+```
+This leaves the real `systemd-backlight@backlight:amdgpu_bl*.service` untouched.
+
+**Once stable on the new kernel:** remove the old kernel packages if you no longer want the fallback, and re-enable livepatch if it was disabled during the migration:
+```bash
+sudo canonical-livepatch enable
+```
+
+**Also worth checking (inert under Wayland, revisit only if you ever fall back to Xorg):** a `.run`-based NVIDIA install can leave `/etc/X11/xorg.conf.d/10-nvidia-brightness.conf` set to `Option "Backlight" "nvidia_0"` (the same known-dead device), and a static BusID-pinned `/etc/X11/xorg.conf` generated by `nvidia-xconfig` — generally not what you want on a hybrid Optimus laptop. Confirm you're on Wayland first: `echo $XDG_SESSION_TYPE`.
+
+---
+
+## 3. `asusd-user` crashes on every login
+
+**Symptom:** `asusd-user.service` (the GNOME user-session component) fails with a core-dump every login.
+
+**Root cause has two layers:**
+1. A leftover unit override — some setup guides drop `/etc/xdg/systemd/user/asusd-user.service`, pointing at a stale hand-built binary at `/usr/local/bin/asusd-user` instead of the real apt-installed `/usr/bin/asusd-user`.
+2. **The correct package binary crashes too**, on laptops with more than one Aura-lighting-capable device (e.g. keyboard + a second lighting zone). Confirmed by running `/usr/bin/asusd-user --version` directly: it panics with a D-Bus `MethodError` on `Unknown object '/xyz/ljones/Aura'`. The running `asusd` daemon exposes **per-device** Aura D-Bus paths (e.g. `/xyz/ljones/aura/<id1>` and `/xyz/ljones/aura/<id2>`), but this version of `asusd-user` hardcodes the old singular path. This is an **upstream asusctl bug**, not fixable via config — check the [asusctl releases page](https://gitlab.com/asus-linux/asusctl/-/releases) periodically for a fix if your laptop has multiple Aura zones.
+
+**Fix (mitigation, not a real fix):**
+```bash
+sudo rm -f /etc/xdg/systemd/user/asusd-user.service
+sudo rm -f /usr/local/bin/asusd-user
+systemctl --global mask asusd-user.service
+```
+This stops the crash-loop/log spam. Fan curves, power profiles, and keyboard backlight brightness (via `asusctl -k` / the system `asusd.service`) all keep working — only the user-level tray/notification helper (Aura sync notifications, etc.) is disabled.
+
+**To retry in future:** if a newer `.deb`/apt version fixes multi-device Aura enumeration, install it, then `sudo systemctl --global unmask asusd-user.service`, and test `asusd-user --version` no longer panics before re-enabling.
+
+---
+
+## 4. `rog-control-center` (tray GUI) doesn't start automatically, or behaves oddly
+
+**Two separate issues, same root pattern as the `asusd-user` crash above:**
+
+1. **No autostart entry at all** — the GUI never launches at login unless started manually.
+2. **Stale-binary shadowing**: a correct package binary at `/usr/bin/rog-control-center` can be shadowed in `$PATH` by an older hand-built copy at `/usr/local/bin/rog-control-center` left over from an earlier manual build. The stale one runs without hard-crashing but logs `Multiple asusd interfaces devices found` and repeated `Attribute with no name, skipping` — a degraded/version-mismatched state, same symptom family as the `asusd-user` bug. The correct `/usr/bin` one only logs two harmless `WARN` lines about supergfxd version and no dGPU status.
+
+**Fix:**
+```bash
+sudo rm -f /usr/local/bin/rog-control-center
+```
+Then create `~/.config/autostart/rog-control-center.desktop` as a copy of the package's `/usr/share/applications/rog-control-center.desktop`, with `X-GNOME-Autostart-enabled=true` added. Since its `Exec=rog-control-center` line is a bare `$PATH` lookup (no hardcoded path), removing the stale binary makes it resolve to the correct one automatically.
+
+Check `~/.config/rog/rog-control-center.cfg` has `startup_in_background: true` and `enable_tray_icon: true` if you want it to start silently in the tray with no popup window. Takes effect at next login.
+
+---
+
+## 5. Brightness keys stop working intermittently
 
 **Symptom:** F7/F8 brightness keys work on some boots, silently do nothing on others.
 
@@ -48,13 +157,13 @@ Point your F7/F8 GNOME custom keyboard shortcuts at it instead of a raw `brightn
 /home/<you>/.local/bin/panel-brightness set 5%-
 ```
 
-**Known residual gap:** this only covers the physical F7/F8 keys via the custom-keybinding mechanism. The GNOME on-screen brightness slider (Quick Settings / Settings > Displays) goes through `logind`'s own `SetBrightness` D-Bus call, which does its own device selection among `amdgpu_bl*` vs a phantom `nvidia_0` backlight device — not covered by this fix. Not observed as an actual problem in practice, but worth knowing about.
+**Known residual gap:** this only covers the physical F7/F8 keys via the custom-keybinding mechanism. The GNOME on-screen brightness slider (Quick Settings / Settings > Displays) goes through `logind`'s own `SetBrightness` D-Bus call, which does its own device selection among `amdgpu_bl*` vs the phantom `nvidia_0` backlight device — not covered by this fix. Not observed as an actual problem in practice, but worth knowing about.
 
 **Verify:** `~/.local/bin/panel-brightness info` should report whichever `amdgpu_bl*` device exists that boot; F7/F8 should visibly dim/brighten the screen regardless of the device number.
 
 ---
 
-## 2. MUX / GPU mode switching (`supergfxctl`)
+## 6. MUX / GPU mode switching (`supergfxctl`)
 
 This laptop has a **real hardware MUX**, not just software Optimus. Supported modes (confirmed via `supergfxctl -s`):
 
@@ -73,9 +182,17 @@ If `/etc/supergfxd.conf` has `always_reboot: false`, a logout (within the ~180s 
 
 **Caveat:** the brightness fix above (`panel-brightness`) only looks for `amdgpu_bl*` devices. That's correct in `Hybrid` and moot in `Integrated`, but **would silently fail in `AsusMuxDgpu` mode**, since the AMD iGPU isn't driving the panel there and `amdgpu_bl*` may not exist. Only worth fixing if you actually use `AsusMuxDgpu` day-to-day — if so, generalize the wrapper to detect whichever backlight device is real for the currently active `supergfxctl` mode.
 
+**Fan curves (`asusctl fan-curve`):** three power profiles (`Quiet`/`Balanced`/`Performance`), each with a firmware-default CPU/GPU/MID curve. By default, custom curve control is disabled on all three — the EC's own firmware fan logic drives the fans, not `asusd`.
+```bash
+asusctl profile -P <Quiet|Balanced|Performance>       # switch profile (or -n to cycle)
+asusctl fan-curve -m <profile> -e true                # enable custom curve control
+asusctl fan-curve -m <profile> -f <cpu|gpu|mid> -D <temp:percent,...>   # e.g. 30c:20%,50c:30%,65c:45%,75c:65%,85c:90%,95c:100%
+asusctl fan-curve -m <profile> -d                     # revert to firmware default
+```
+
 ---
 
-## 3. Suspend: laptop stays warm / wakes immediately after closing the lid
+## 7. Suspend: laptop stays warm / wakes immediately after closing the lid
 
 **Symptom:** laptop suspended via lid-close or idle wakes back up almost immediately (observed: a suspend cycle that lasted only ~2 seconds), then stays fully awake and warm for hours in a bag.
 
@@ -141,6 +258,26 @@ journalctl -b -k | grep -i spurious                # should be empty/gone
 
 ---
 
+## 8. General system reliability (not G14-specific, but bit us alongside the above)
+
+**Automatic security updates can look "on" while silently doing nothing.** `unattended-upgrades.service` showing `enabled` in systemd is not proof it's doing anything — check its actual trigger config:
+```bash
+cat /etc/apt/apt.conf.d/20auto-upgrades
+```
+If `Update-Package-Lists` or `Download-Upgradeable-Packages` is `"0"`, the service has nothing to act on despite looking enabled. Cross-check with `/var/log/apt/history.log*` for when unattended-upgrade activity actually last ran. On this machine, some earlier step in the GPU/kernel setup process had silently disabled this — plausibly to stop apt from pulling a newer kernel and breaking a fragile manual `.run`-driver setup (the exact failure mode in section 2 above). Once you're on an apt-managed driver + a real HWE kernel, it's safe to restore:
+```bash
+sudo tee /etc/apt/apt.conf.d/20auto-upgrades <<'EOF'
+APT::Periodic::Update-Package-Lists "1";
+APT::Periodic::Unattended-Upgrade "1";
+EOF
+```
+
+**Also check for orphaned kernel debris** from earlier abandoned kernel-migration attempts — headers/modules for kernel versions with no matching bootable image (`apt-mark showmanual` + cross-check against `dpkg -l 'linux-image-*'`), and orphaned `/boot/initrd.img-*` files with no matching installed kernel package. These are pure dead weight and safe to purge with `sudo apt autoremove` once confirmed orphaned.
+
+**Nice-to-have, not a fix:** a battery charge limit for longevity, e.g. `asusctl -c 80`.
+
+---
+
 ## Changelog
 
-- Documented brightness, MUX, and suspend fixes tested on this GA403UI unit; noted tested `nvidia-driver-580` (580.173.02) and HWE kernel range `7.0.0-28` → `7.0.0-30`.
+- Folded in the full setup/fix history for this GA403UI unit: boot splash (§1), kernel+driver migration off a frozen manual install (§2), `asusd-user` crash (§3), `rog-control-center` autostart (§4), brightness (§5), MUX/fan curves (§6), suspend (§7), and general update/reliability hygiene (§8).
