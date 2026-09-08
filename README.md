@@ -1,6 +1,9 @@
 # asusctl-for-Ubuntu
 Porting asusctl (made for Fedora) for Ubuntu
 
+> **Have an ASUS ROG Zephyrus G14 2024 (GA403UI) or similar Ryzen + NVIDIA MUX laptop with an OLED panel?**
+> See [`TESTED-CONFIG-GA403UI.md`](TESTED-CONFIG-GA403UI.md) for the specific tested kernel/driver combo and fixes for intermittent brightness keys, MUX/GPU mode switching, and suspend not staying asleep.
+
 Installing asusctl on Ubuntu
 
 asusctl is a fantastic utility for ASUS ROG/TUF laptops, but it is primarily packaged for Fedora and Arch. This guide provides the specific steps, manual patches, and troubleshooting fixes required to get it running perfectly on Ubuntu.
@@ -101,3 +104,5 @@ Add the parameter to GRUB_CMDLINE_LINUX_DEFAULT.
 Run
 
     sudo update-grub and reboot.
+
+**Note:** on at least one tested OLED panel (GA403UI), `acpi_backlight=vendor`/`video` and `amdgpu.backlight=0` had **no effect** on brightness at all — the panel's ACPI backlight interface accepts writes but doesn't actually change hardware brightness. If this GRUB param doesn't fix it for you, the real cause is likely an unstable `amdgpu_bl*` device name across boots, not the ACPI backlight path — see [`TESTED-CONFIG-GA403UI.md`](TESTED-CONFIG-GA403UI.md#1-brightness-keys-stop-working-intermittently) for a fix that resolves that case.
