@@ -127,6 +127,26 @@ Then create `~/.config/autostart/rog-control-center.desktop` as a copy of the pa
 
 Check `~/.config/rog/rog-control-center.cfg` has `startup_in_background: true` and `enable_tray_icon: true` if you want it to start silently in the tray with no popup window. Takes effect at next login.
 
+3. **Shadow binary far enough ahead of the daemon causes a hard crash-loop, not just degraded logging.** If the shadowing binary in `/usr/local/bin` is *newer* than the installed `asusd` (e.g. a hand-built `rog-control-center` 6.1.15 against an apt-installed `asusd` 6.1.12), the D-Bus schema drift goes past "degraded" into an outright panic: `Io error: Broken pipe (os error 32)` followed by `thread 'main' panicked ... Error running winit event loop: Exit Failure: 1`. GNOME's session manager relaunches the autostart app scope every time it dies — so this shows up as unexplained, recurring crash/tray notifications throughout the day rather than a one-time glitch. `journalctl --since "-1d" | grep rog-control-center.desktop` will show the repeating `Version mismatch: asusctl = X, asusd = Y` line right before each crash.
+
+**Fix:** get `asusd` / `asusctl` / `asusd-user` / `rog-control-center` back onto one matching version — ideally current upstream rather than whatever's in Ubuntu's apt repo (apt lags, and a stale local `git` checkout can lag too):
+```bash
+# heads up: this project migrated off GitLab in mid-2026 — gitlab.com/asus-linux/asusctl
+# is now a frozen mirror stuck at 6.3.8. Current development + releases live at
+# https://github.com/OpenGamingCollective/asusctl
+cd asusctl   # your existing checkout — add a new remote rather than losing origin's history
+git remote add github https://github.com/OpenGamingCollective/asusctl.git
+git fetch --tags github
+git checkout <latest-tag>   # e.g. 6.5.0 — check the repo's Releases page for current
+make build
+sudo make install
+sudo rm -f /usr/local/bin/rog-control-center   # remove any older shadow copy, same as above
+sudo systemctl daemon-reload
+sudo systemctl restart asusd
+```
+
+**Verify:** `journalctl -u asusd --no-pager | grep "daemon v"` shows the same new version for every component (`rog-anime`, `rog-slash`, `rog-aura`, `rog-profiles`, `rog-platform`), and relaunching `rog-control-center` logs no `Version mismatch`, `Multiple asusd interfaces devices found`, or `Io error: Broken pipe` lines.
+
 ---
 
 ## 5. Brightness keys stop working intermittently
@@ -278,6 +298,28 @@ EOF
 
 ---
 
+## 9. GNOME `Battery-Health-Charging` extension fights `asusd` and spams polkit prompts
+
+**Symptom:** unexplained authentication activity (polkit prompts, or a fingerprint-daemon cycle if your prompt flow auto-tries fingerprint) roughly every 20-40 minutes, all day, for no apparent reason.
+
+**Root cause, two layers:**
+1. **Redundant with `asusd`.** The popular [Battery-Health-Charging](https://github.com/maniacx/Battery-Health-Charging) GNOME extension has Asus-specific support that writes directly to `/sys/class/power_supply/BAT*/charge_control_end_threshold` — the exact same sysfs knob `asusd` already manages natively (`asusctl -c <20-100>`, or the slider in `rog-control-center`). Two independent, unaware-of-each-other writers on one knob is the same conflict class as `power-profiles-daemon` vs `asusd` above — whichever ran most recently wins, silently.
+2. **Its own polkit rule can go missing.** The extension ships a rule (`10-dem.batteryhealthcharging.setthreshold.rules`) meant to let its periodic `CHECKINSTALLATION` self-check run via `pkexec` without prompting. If that rule isn't actually present under `/etc/polkit-1/rules.d` or `/usr/share/polkit-1/rules.d` — confirm with `find /etc/polkit-1 /usr/share/polkit-1 -iname '*batteryhealth*'` — every periodic check falls back to the generic `org.freedesktop.policykit.exec` action and forces a real authentication. Visible in `journalctl` as a `pkexec ... CHECKINSTALLATION ...` line plus an `fprintd`/polkit auth cycle, repeating on the extension's own internal timer all day.
+
+**Fix:** since `asusd`/`rog-control-center` already own charge-limit control on ASUS hardware, just disable (or fully remove) the extension rather than fixing its polkit rule:
+```bash
+gnome-extensions disable Battery-Health-Charging@maniacx.github.com
+# fully remove instead, if you don't need it for some other non-Asus device:
+# rm -rf ~/.local/share/gnome-shell/extensions/Battery-Health-Charging@maniacx.github.com
+# sudo rm -f /usr/local/bin/batteryhealthchargingctl-$USER
+```
+
+**Verify:** `journalctl --since "-1h" | grep CHECKINSTALLATION` stays empty going forward, and the charge limit is still enforced — `cat /sys/class/power_supply/BAT*/charge_control_end_threshold` matches whatever you set with `asusctl -c`.
+
+---
+
 ## Changelog
 
 - Folded in the full setup/fix history for this GA403UI unit: boot splash (§1), kernel+driver migration off a frozen manual install (§2), `asusd-user` crash (§3), `rog-control-center` autostart (§4), brightness (§5), MUX/fan curves (§6), suspend (§7), and general update/reliability hygiene (§8).
+- Added the hard-crash-loop variant of the `rog-control-center` shadow-binary bug (§4.3), noting the project's mid-2026 migration from GitLab to `github.com/OpenGamingCollective/asusctl` and a full version-matched rebuild fix.
+- Added §9: the `Battery-Health-Charging` GNOME extension's Asus support duplicating `asusd`'s charge-limit control and, when its polkit rule isn't installed, causing recurring unexplained authentication prompts every 20-40 minutes.
