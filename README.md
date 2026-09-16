@@ -6,15 +6,22 @@ Porting asusctl (made for Fedora) for Ubuntu
 
 Installing asusctl on Ubuntu
 
-asusctl is a fantastic utility for ASUS ROG/TUF laptops, but it is primarily packaged for Fedora and Arch. This guide provides the specific steps, manual patches, and troubleshooting fixes required to get it running perfectly on Ubuntu.
+asusctl is a fantastic utility for ASUS ROG/TUF laptops, but it is primarily packaged for Fedora and Arch. Upstream's own README now includes a bare-bones "Ubuntu and Pop!_OS (Unsupported)" build recipe too, but it stops at `make install`. This guide covers everything upstream doesn't: the full dependency list needed to build `rog-control-center` (the GUI) as well as `asusd`, and the Ubuntu-specific post-install fixes (service conflicts, D-Bus policy, udev/kernel modules, group membership) required to get it actually working.
+
+> **Note on kernel version:** TDP control depends on the `asus-armoury` kernel driver, mainline only since Linux 6.19. Ubuntu LTS releases ship much older kernels, so on stock Ubuntu 24.04 (and older) expect TDP sliders to be unavailable until you're on a newer kernel (e.g. via the mainline/liquorix/xanmod kernel PPAs). Everything else in asusctl works fine on older kernels.
+
 1. Install System Dependencies
 
-Ubuntu uses different package names than the Fedora defaults. Run this to prepare your environment:
+Ubuntu uses different package names than the Fedora defaults. This list merges what's been confirmed needed to build both `asusd` and the `rog-control-center` GUI on Ubuntu:
 
     sudo apt update
     sudo apt install -y libclang-dev libudev-dev libseccomp-dev \
-    libseat-dev libsensors4-dev libpulse-dev \
-    build-essential git cmake
+    libseat-dev libsensors4-dev libpulse-dev libssl-dev libx11-dev \
+    libxkbcommon-dev libgbm-dev libinput-dev libfontconfig1-dev \
+    libfreetype6-dev libexpat1-dev libxcb-composite0-dev libasound2-dev \
+    pkg-config build-essential git cmake
+
+If you only need the CLI/daemon (`asusctl`/`asusd`) and not the GUI, you can drop the GTK/X11-related packages (`libx11-dev`, `libxkbcommon-dev`, `libgbm-dev`, `libinput-dev`, `libfontconfig1-dev`, `libfreetype6-dev`, `libxcb-composite0-dev`).
 
 2. Install Rust Toolchain
 
@@ -32,18 +39,14 @@ Set the Clang Path: Rust needs to know where libclang is. Note that the version 
 
     export LIBCLANG_PATH=/usr/lib/llvm-14/lib
 
-3. Clone and Manual Patching
-
-Since asusctl expects Fedora's group permissions, we need to patch the source before building.
-
-Clone the repo:
+3. Clone the Repository
 
     git clone https://gitlab.com/asus-linux/asusctl.git
     cd asusctl
 
-Fix Group Permissions (udev): Ubuntu uses the sudo group for administrative privileges, while Fedora uses wheel. Run this command to swap them in the configuration:
+> **No manual group patching needed anymore.** Older versions of this guide had you `sed` a `GROUP="wheel"` udev rule to `GROUP="sudo"`. As of current upstream, that string doesn't even exist in the udev rules file (`data/asusd.rules`) — the actual permission gate is the D-Bus policy in `data/asusd.conf`, and it already ships with `<policy group="sudo">` alongside `wheel`, `adm`, and `users`, so Ubuntu accounts (which are in `sudo`, not `wheel`) are covered out of the box. If you still hit a D-Bus permission error after install, see the Troubleshooting FAQ below — it's almost always the missing `/etc/dbus-1/system.d` symlink, not group ownership.
 
-    sed -i 's/GROUP="wheel"/GROUP="sudo"/g' data/99-asusd.rules
+> Upstream's issue tracker and Arch packaging have moved to GitHub ([OpenGamingCollective/asusctl](https://github.com/OpenGamingCollective/asusctl)); the GitLab URL above still works as a mirror for cloning, but file bugs/questions against the GitHub repo.
 
 4. Build and Install
 
