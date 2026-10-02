@@ -318,8 +318,36 @@ gnome-extensions disable Battery-Health-Charging@maniacx.github.com
 
 ---
 
+## 10. Touchpad settings (GNOME)
+
+These are the GNOME touchpad settings in use on this unit. They live in dconf, not in any config file, so a fresh install or new user account loses them. Nothing here is G14-specific; it's just what was tuned.
+
+Notable choices: `accel-profile 'flat'` (no pointer acceleration), `speed 0.2`, natural scrolling, tap-to-click and tap-and-drag on, edge scrolling off, `click-method 'areas'` (clicks depend on where you press, not finger count).
+
+```bash
+gsettings set org.gnome.desktop.peripherals.touchpad accel-profile 'flat'
+gsettings set org.gnome.desktop.peripherals.touchpad click-method 'areas'
+gsettings set org.gnome.desktop.peripherals.touchpad disable-while-typing true
+gsettings set org.gnome.desktop.peripherals.touchpad edge-scrolling-enabled false
+gsettings set org.gnome.desktop.peripherals.touchpad left-handed 'mouse'
+gsettings set org.gnome.desktop.peripherals.touchpad middle-click-emulation false
+gsettings set org.gnome.desktop.peripherals.touchpad natural-scroll true
+gsettings set org.gnome.desktop.peripherals.touchpad send-events 'enabled'
+gsettings set org.gnome.desktop.peripherals.touchpad speed 0.2
+gsettings set org.gnome.desktop.peripherals.touchpad tap-and-drag true
+gsettings set org.gnome.desktop.peripherals.touchpad tap-and-drag-lock false
+gsettings set org.gnome.desktop.peripherals.touchpad tap-button-map 'default'
+gsettings set org.gnome.desktop.peripherals.touchpad tap-to-click true
+gsettings set org.gnome.desktop.peripherals.touchpad two-finger-scrolling-enabled true
+```
+
+**Verify:** `gsettings list-recursively org.gnome.desktop.peripherals.touchpad` matches the values above. Changes apply immediately, with no logout needed. To back up or restore everything at once: `dconf dump /org/gnome/desktop/peripherals/touchpad/ > touchpad.dconf` and `dconf load /org/gnome/desktop/peripherals/touchpad/ < touchpad.dconf`.
+
+---
+
 ## Changelog
 
 - Folded in the full setup/fix history for this GA403UI unit: boot splash (§1), kernel+driver migration off a frozen manual install (§2), `asusd-user` crash (§3), `rog-control-center` autostart (§4), brightness (§5), MUX/fan curves (§6), suspend (§7), and general update/reliability hygiene (§8).
 - Added the hard-crash-loop variant of the `rog-control-center` shadow-binary bug (§4.3), noting the project's mid-2026 migration from GitLab to `github.com/OpenGamingCollective/asusctl` and a full version-matched rebuild fix.
 - Added §9: the `Battery-Health-Charging` GNOME extension's Asus support duplicating `asusd`'s charge-limit control and, when its polkit rule isn't installed, causing recurring unexplained authentication prompts every 20-40 minutes.
+- Added §10: GNOME touchpad settings (flat accel, speed 0.2, natural scroll, tap-to-click, `areas` click method) with reproducible `gsettings` commands.
