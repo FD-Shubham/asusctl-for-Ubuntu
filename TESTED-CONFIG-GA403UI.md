@@ -345,9 +345,26 @@ gsettings set org.gnome.desktop.peripherals.touchpad two-finger-scrolling-enable
 
 ---
 
+## 11. F6 as a screenshot key (GNOME)
+
+On the G14 the F6 key is labelled as the screen-snip key, but nothing is bound to it out of the box. GNOME's screenshot UI (region / window / full screen picker) is bound to `Print` only. Add F6 alongside it:
+
+```bash
+gsettings set org.gnome.shell.keybindings show-screenshot-ui "['Print', 'F6']"
+```
+
+This lives in dconf, so like the touchpad settings it is lost on a fresh install or new user account. Changes apply immediately, with no logout needed.
+
+**Verify:** `gsettings get org.gnome.shell.keybindings show-screenshot-ui` prints `['Print', 'F6']`, and pressing F6 opens the screenshot UI. If nothing happens, try Fn+F6: depending on the Fn-lock state the F-row sends media keys by default. Also check F6 isn't already taken by a custom shortcut (`gsettings get org.gnome.settings-daemon.plugins.media-keys custom-keybindings`, then read each `binding`).
+
+To undo: `gsettings reset org.gnome.shell.keybindings show-screenshot-ui`.
+
+---
+
 ## Changelog
 
 - Folded in the full setup/fix history for this GA403UI unit: boot splash (§1), kernel+driver migration off a frozen manual install (§2), `asusd-user` crash (§3), `rog-control-center` autostart (§4), brightness (§5), MUX/fan curves (§6), suspend (§7), and general update/reliability hygiene (§8).
 - Added the hard-crash-loop variant of the `rog-control-center` shadow-binary bug (§4.3), noting the project's mid-2026 migration from GitLab to `github.com/OpenGamingCollective/asusctl` and a full version-matched rebuild fix.
 - Added §9: the `Battery-Health-Charging` GNOME extension's Asus support duplicating `asusd`'s charge-limit control and, when its polkit rule isn't installed, causing recurring unexplained authentication prompts every 20-40 minutes.
 - Added §10: GNOME touchpad settings (flat accel, speed 0.2, natural scroll, tap-to-click, `areas` click method) with reproducible `gsettings` commands.
+- Added §11: binding F6 to GNOME's screenshot UI via `gsettings` (alongside `Print`).
