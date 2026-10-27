@@ -361,6 +361,33 @@ To undo: `gsettings reset org.gnome.shell.keybindings show-screenshot-ui`.
 
 ---
 
+## 12. VLC shows a black screen on GoPro / high-bitrate video
+
+VLC 3.0.20 (Ubuntu's packaged version) plays the audio but shows a black picture for some heavy clips. Seen with a GoPro file (H.264, 2704x1520 @ 59.94 fps, ~60 Mbps). The file itself is fine: decoding it with VLC's software decoder produced a correct frame. The problem is VLC 3.0's hardware-accelerated decoding path (VA-API/VDPAU) on this driver stack.
+
+Quick test from a terminal:
+
+```bash
+vlc --avcodec-hw=none video.mp4
+```
+
+Make it the default by editing VLC's config (quit VLC first, since it can rewrite the file on exit):
+
+```bash
+cp ~/.config/vlc/vlcrc ~/.config/vlc/vlcrc.bak
+sed -i 's/^#avcodec-hw=any/avcodec-hw=none/' ~/.config/vlc/vlcrc
+```
+
+Or in the GUI: Tools -> Preferences -> Input / Codecs -> Hardware-accelerated decoding -> Disable.
+
+**Trade-off:** 2.7K/4K at 60 fps may stutter on software decoding. If so, use mpv (`sudo apt install mpv`, then `mpv --hwdec=auto video.mp4`), whose hardware decoding is more reliable. If the picture is still black with hardware decoding off, also try `--vout=xcb_x11`.
+
+**Verify:** `grep '^avcodec-hw' ~/.config/vlc/vlcrc` prints `avcodec-hw=none`.
+
+To undo: `mv ~/.config/vlc/vlcrc.bak ~/.config/vlc/vlcrc`.
+
+---
+
 ## Changelog
 
 - Folded in the full setup/fix history for this GA403UI unit: boot splash (§1), kernel+driver migration off a frozen manual install (§2), `asusd-user` crash (§3), `rog-control-center` autostart (§4), brightness (§5), MUX/fan curves (§6), suspend (§7), and general update/reliability hygiene (§8).
@@ -368,3 +395,4 @@ To undo: `gsettings reset org.gnome.shell.keybindings show-screenshot-ui`.
 - Added §9: the `Battery-Health-Charging` GNOME extension's Asus support duplicating `asusd`'s charge-limit control and, when its polkit rule isn't installed, causing recurring unexplained authentication prompts every 20-40 minutes.
 - Added §10: GNOME touchpad settings (flat accel, speed 0.2, natural scroll, tap-to-click, `areas` click method) with reproducible `gsettings` commands.
 - Added §11: binding F6 to GNOME's screenshot UI via `gsettings` (alongside `Print`).
+- Added §12: VLC black screen on high-bitrate video, fixed by disabling hardware-accelerated decoding (`avcodec-hw=none`).
