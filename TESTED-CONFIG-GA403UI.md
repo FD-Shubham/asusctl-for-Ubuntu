@@ -388,6 +388,43 @@ To undo: `mv ~/.config/vlc/vlcrc.bak ~/.config/vlc/vlcrc`.
 
 ---
 
+## 13. micro-SD card not detected by the built-in card reader
+
+Inserting a micro-SD card sometimes does nothing: no `mmcblk0` in `lsblk`, nothing in Files, and no `mmc0: new ... card` line in `journalctl -k`. The reader itself is fine. The built-in Realtek RTS525A (`10ec:525a`, `rtsx_pci` driver) is listed by `lspci` and `/sys/class/mmc_host/mmc0` exists. The problem is runtime power management: while the reader is runtime-suspended, it sometimes misses the card-insert event.
+
+Confirm it:
+
+```bash
+cat /sys/bus/pci/devices/0000:02:00.0/power/runtime_status   # prints "suspended"
+```
+
+(Check your PCI address with `lspci -nn | grep 525a` if it isn't `02:00.0`.)
+
+Quick fix for the current boot. The card is detected within a second or two, with no need to reinsert it:
+
+```bash
+echo on | sudo tee /sys/bus/pci/devices/0000:02:00.0/power/control
+```
+
+Permanent fix: a udev rule that turns off runtime suspend for this one device:
+
+```bash
+sudo tee /etc/udev/rules.d/99-rtsx-card-reader-no-autosuspend.rules <<'EOF'
+# Keep the Realtek RTS525A SD card reader awake: in runtime suspend it misses card insertions.
+ACTION=="add", SUBSYSTEM=="pci", ATTR{vendor}=="0x10ec", ATTR{device}=="0x525a", ATTR{power/control}="on"
+EOF
+sudo udevadm control --reload-rules
+sudo udevadm trigger --action=add --subsystem-match=pci --attr-match=vendor=0x10ec --attr-match=device=0x525a
+```
+
+**Trade-off:** a slightly higher idle power draw from the reader (usually a fraction of a watt). TLP, powertop `--auto-tune`, or similar tools can switch runtime PM back to `auto`. If you use one, exclude this device there too (for TLP: `RUNTIME_PM_DENYLIST="02:00.0"`).
+
+**Verify:** `cat /sys/bus/pci/devices/0000:02:00.0/power/control` prints `on` after a reboot, and inserting a card logs `mmc0: new ... card` in `journalctl -k`.
+
+To undo: `sudo rm /etc/udev/rules.d/99-rtsx-card-reader-no-autosuspend.rules`, then reboot.
+
+---
+
 ## Changelog
 
 - Folded in the full setup/fix history for this GA403UI unit: boot splash (§1), kernel+driver migration off a frozen manual install (§2), `asusd-user` crash (§3), `rog-control-center` autostart (§4), brightness (§5), MUX/fan curves (§6), suspend (§7), and general update/reliability hygiene (§8).
@@ -396,3 +433,4 @@ To undo: `mv ~/.config/vlc/vlcrc.bak ~/.config/vlc/vlcrc`.
 - Added §10: GNOME touchpad settings (flat accel, speed 0.2, natural scroll, tap-to-click, `areas` click method) with reproducible `gsettings` commands.
 - Added §11: binding F6 to GNOME's screenshot UI via `gsettings` (alongside `Print`).
 - Added §12: VLC black screen on high-bitrate video, fixed by disabling hardware-accelerated decoding (`avcodec-hw=none`).
+- Added §13: micro-SD cards not detected by the Realtek RTS525A reader due to runtime PM, fixed with a udev rule that sets `power/control=on`.
